@@ -17,3 +17,10 @@ Installation / création de l’APK :
 Compatibilité : Android 8.0 (API 26) et plus.
 Remarque : l’application mesure le trafic total du téléphone (Wi‑Fi ou données mobiles),
 réception + envoi. Ce n’est pas un test de débit maximal comme Speedtest.
+
+Compilation en ligne avec GitHub Actions :
+1. Importer le contenu de ce dossier dans un dépôt GitHub, à la racine (le dossier app, settings.gradle, build.gradle et .github doivent être à la racine du dépôt).
+2. Faire un commit/push sur la branche main, ou ouvrir Actions et lancer "Build Android APK" avec Run workflow.
+3. Ouvrir le run terminé puis télécharger l'artefact "VitesseInternet-debug-apk".
+4. Extraire app-debug.apk et l'installer sur le téléphone.
+Le workflow utilise JDK 17 et Gradle 8.7, sans avoir besoin d'un fichier gradlew.

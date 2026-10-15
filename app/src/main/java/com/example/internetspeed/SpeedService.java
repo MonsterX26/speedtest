@@ -47,7 +47,7 @@ public class SpeedService extends Service {
             } else {
                 if (overlay != null) overlay.setText("  ↓↑ Indisponible  ");
             }
-            handler.postDelayed(this, 1000);
+            handler.postDelayed(this, 500);
         }
     };
 
@@ -119,7 +119,7 @@ public class SpeedService extends Service {
         overlay.setTextSize(12);
         overlay.setGravity(Gravity.CENTER);
         overlay.setPadding(6, 5, 6, 5);
-        overlay.setBackgroundColor(Color.rgb(18, 105, 83));
+        overlay.setBackgroundColor(Color.rgb(8, 35, 93));
         int type = Build.VERSION.SDK_INT >= 26
             ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             : WindowManager.LayoutParams.TYPE_PHONE;

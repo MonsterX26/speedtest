@@ -1,400 +1,352 @@
+
 package com.monsterx26.speedtest;
 
-import android.app.Activity;
+import android.app.Service;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
-import android.os.Bundle;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.view.Gravity;
-import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
+import android.graphics.drawable.Icon;
+import android.os.Build;
+import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
+import android.net.TrafficStats;
 
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity {
+public class SpeedService extends Service {
 
-    private final ExecutorService worker =
-            Executors.newSingleThreadExecutor();
+    private static final String CHANNEL = "internet_usage";
 
-    private final android.os.Handler handler =
-            new android.os.Handler();
+    private final Handler handler =
+            new Handler(Looper.getMainLooper());
 
-    private TextView status, ping, download, upload;
-    private TextView live, daily, monthly;
-    private Button testButton, startMeter, stopMeter;
+    private long previousBytes = -1;
+    private long previousTime = 0;
 
-    private volatile boolean testing = false;
-
-    private final Runnable refresh = new Runnable() {
+    private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
-            android.content.SharedPreferences p =
-                    getSharedPreferences("speed", MODE_PRIVATE);
+            long now = System.currentTimeMillis();
 
-            live.setText("Vitesse actuelle : "
-                    + p.getString("value", "Mesure…"));
+            long rx = TrafficStats.getTotalRxBytes();
+            long tx = TrafficStats.getTotalTxBytes();
 
-            status.setText(
-                    p.getBoolean("running", false)
-                            ? "Compteur actif"
-                            : "Compteur arrêté"
-            );
+            long total = (rx < 0 || tx < 0)
+                    ? -1 : rx + tx;
 
-            daily.setText(p.getString(
-                    "daily", "Aujourd’hui : en attente"));
+            String speed = "Indisponible";
 
-            monthly.setText(p.getString(
-                    "monthly", "Ce mois : en attente"));
+            if (total >= 0) {
+                if (previousBytes >= 0
+                        && total >= previousBytes
+                        && now > previousTime) {
 
-            handler.postDelayed(this, 1000);
+                    double rate =
+                            (total - previousBytes) * 1000.0
+                            / (now - previousTime);
+
+                    speed = formatRate(rate);
+                } else {
+                    speed = "0 KB/s";
+                }
+
+                previousBytes = total;
+                previousTime = now;
+
+                updateUsage(total, now);
+            }
+
+            getSharedPreferences("speed", MODE_PRIVATE)
+                    .edit()
+                    .putString("value", speed)
+                    .putBoolean("running", true)
+                    .apply();
+
+            NotificationManager nm =
+                    (NotificationManager)
+                    getSystemService(NOTIFICATION_SERVICE);
+
+            nm.notify(1, buildNotification(
+                    speed,
+                    getSharedPreferences("speed", MODE_PRIVATE)
+                            .getString("daily",
+                                    "Aujourd'hui : calcul…"),
+                    getSharedPreferences("speed", MODE_PRIVATE)
+                            .getString("monthly",
+                                    "Ce mois : calcul…")
+            ));
+
+            handler.postDelayed(this, 500);
         }
     };
 
     @Override
-    public void onCreate(Bundle state) {
-        super.onCreate(state);
+    public void onCreate() {
+        super.onCreate();
+        createChannel();
 
-        getWindow().setStatusBarColor(Color.rgb(16, 42, 67));
-        getWindow().setNavigationBarColor(Color.rgb(16, 42, 67));
-
-        buildUi();
+        startForeground(1, buildNotification(
+                "Mesure…",
+                "Aujourd'hui : calcul…",
+                "Ce mois : calcul…"
+        ));
     }
 
-    private TextView text(
-            String value, int size, int color, boolean bold) {
+    @Override
+    public int onStartCommand(
+            Intent intent, int flags, int startId) {
 
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(size);
-        t.setTextColor(color);
+        handler.removeCallbacks(ticker);
+        handler.post(ticker);
 
-        if (bold) {
-            t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        getSharedPreferences("speed", MODE_PRIVATE)
+                .edit()
+                .putBoolean("running", true)
+                .apply();
+
+        return START_STICKY;
+    }
+
+    private String formatRate(double bps) {
+        if (bps < 1024) {
+            return String.format(
+                    Locale.US, "%.0f B/s", bps);
         }
 
-        t.setGravity(Gravity.CENTER);
-        t.setPadding(6, 7, 6, 7);
+        if (bps < 1024 * 1024) {
+            return String.format(
+                    Locale.US, "%.1f KB/s", bps / 1024);
+        }
 
-        return t;
+        return String.format(
+                Locale.US, "%.2f MB/s",
+                bps / (1024 * 1024));
     }
 
-    private void buildUi() {
-        ScrollView scroll = new ScrollView(this);
+    private String[] statusRateParts(String rate) {
+        if (rate == null) {
+            return new String[]{"--", "KB/s"};
+        }
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setPadding(18, 16, 18, 18);
-        root.setBackgroundColor(Color.rgb(245, 248, 250));
+        String value = rate.trim();
 
-        scroll.addView(root);
+        if (value.endsWith("MB/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 4).trim(),
+                    "MB/s"
+            };
+        }
 
-        root.addView(text(
-                "SPEED LITE", 23, Color.rgb(16, 42, 67), true));
+        if (value.endsWith("KB/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 4).trim(),
+                    "KB/s"
+            };
+        }
 
-        root.addView(text(
-                "Test et suivi de la connexion",
-                13, Color.DKGRAY, false));
+        if (value.endsWith("B/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 3).trim(),
+                    "B/s"
+            };
+        }
 
-        status = text("Prêt", 13, Color.GRAY, false);
-        root.addView(status);
-
-        ping = addMetric(root, "PING", "—", "ms");
-
-        download = addMetric(
-                root, "TÉLÉCHARGEMENT", "—", "Mbps");
-
-        upload = addMetric(root, "ENVOI", "—", "Mbps");
-
-        testButton = new Button(this);
-        testButton.setText("DÉMARRER LE TEST");
-        root.addView(testButton, fullWidth());
-        testButton.setOnClickListener(v -> beginTest());
-
-        root.addView(text(
-                "SUIVI EN TEMPS RÉEL",
-                15, Color.rgb(16, 42, 67), true));
-
-        live = text(
-                "Vitesse actuelle : Mesure…",
-                18, Color.rgb(0, 137, 112), true);
-        root.addView(live);
-
-        daily = text(
-                "Aujourd’hui : en attente",
-                14, Color.DKGRAY, false);
-        root.addView(daily);
-
-        monthly = text(
-                "Ce mois : en attente",
-                14, Color.DKGRAY, false);
-        root.addView(monthly);
-
-        startMeter = new Button(this);
-        startMeter.setText("ACTIVER L’AFFICHAGE DANS LA BARRE D’ÉTAT");
-        root.addView(startMeter, fullWidth());
-        startMeter.setOnClickListener(v -> startMeter());
-
-        stopMeter = new Button(this);
-        stopMeter.setText("ARRÊTER LE COMPTEUR");
-        root.addView(stopMeter, fullWidth());
-
-        stopMeter.setOnClickListener(v -> {
-            stopService(new Intent(this, SpeedService.class));
-            status.setText("Compteur arrêté");
-        });
-
-        root.addView(text(
-                "La vitesse actuelle apparaît dans la barre d’état "
-                + "et dans la notification persistante.",
-                12, Color.GRAY, false));
-
-        setContentView(scroll);
+        return new String[]{value, ""};
     }
 
-    private LinearLayout.LayoutParams fullWidth() {
-        LinearLayout.LayoutParams p =
-                new LinearLayout.LayoutParams(-1, -2);
+    private void updateUsage(long totalBytes, long now) {
+        android.content.SharedPreferences p =
+                getSharedPreferences("usage", MODE_PRIVATE);
 
-        p.setMargins(0, 5, 0, 5);
-        return p;
+        String day = new SimpleDateFormat(
+                "yyyy-MM-dd", Locale.US)
+                .format(new Date(now));
+
+        String month = new SimpleDateFormat(
+                "yyyy-MM", Locale.US)
+                .format(new Date(now));
+
+        String oldDay = p.getString("day", "");
+        String oldMonth = p.getString("month", "");
+
+        long lastTotal = p.getLong("lastTotal", totalBytes);
+        long daily = p.getLong("daily", 0);
+        long monthly = p.getLong("monthly", 0);
+
+        if (!day.equals(oldDay)) daily = 0;
+        if (!month.equals(oldMonth)) monthly = 0;
+
+        long delta = totalBytes >= lastTotal
+                ? totalBytes - lastTotal : 0;
+
+        daily += delta;
+        monthly += delta;
+
+        p.edit()
+                .putString("day", day)
+                .putString("month", month)
+                .putLong("lastTotal", totalBytes)
+                .putLong("daily", daily)
+                .putLong("monthly", monthly)
+                .apply();
+
+        getSharedPreferences("speed", MODE_PRIVATE)
+                .edit()
+                .putString("daily",
+                        "Aujourd'hui : " + formatBytes(daily))
+                .putString("monthly",
+                        "Ce mois : " + formatBytes(monthly))
+                .apply();
     }
 
-    private TextView addMetric(
-            LinearLayout root,
-            String label,
-            String value,
-            String unit) {
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) {
+            return String.format(
+                    Locale.US, "%.0f B", (double) bytes);
+        }
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setGravity(Gravity.CENTER);
-        card.setPadding(8, 8, 8, 8);
-        card.setBackgroundColor(Color.WHITE);
+        if (bytes < 1024L * 1024) {
+            return String.format(
+                    Locale.US, "%.1f KB", bytes / 1024.0);
+        }
 
-        LinearLayout.LayoutParams cp = fullWidth();
-        cp.setMargins(0, 5, 0, 5);
-        root.addView(card, cp);
+        if (bytes < 1024L * 1024 * 1024) {
+            return String.format(
+                    Locale.US, "%.2f MB",
+                    bytes / (1024.0 * 1024));
+        }
 
-        card.addView(text(
-                label, 12, Color.rgb(75, 91, 105), true));
-
-        LinearLayout line = new LinearLayout(this);
-        line.setGravity(Gravity.CENTER);
-
-        TextView number = text(
-                value, 30, Color.rgb(0, 137, 112), true);
-
-        line.addView(number);
-        line.addView(text(unit, 13, Color.DKGRAY, false));
-        card.addView(line);
-
-        return number;
+        return String.format(
+                Locale.US, "%.2f GB",
+                bytes / (1024.0 * 1024 * 1024));
     }
 
-    private void startMeter() {
-        Intent i = new Intent(this, SpeedService.class);
+    private Notification buildNotification(
+            String speed, String daily, String monthly) {
 
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(i);
+        Notification.Builder builder;
+
+        if (Build.VERSION.SDK_INT >= 26) {
+            builder = new Notification.Builder(this, CHANNEL);
         } else {
-            startService(i);
+            builder = new Notification.Builder(this);
         }
 
-        status.setText("Affichage actif dans la barre d’état");
-    }
+        builder.setContentTitle("Vitesse Internet : " + speed)
+                .setContentText(daily + " • " + monthly)
+                .setStyle(new Notification.BigTextStyle()
+                        .bigText("Vitesse actuelle : " + speed
+                                + "\n" + daily
+                                + "\n" + monthly))
+                .setSmallIcon(
+                        android.R.drawable.stat_notify_sync_noanim)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true);
 
-    private void beginTest() {
-        if (testing) return;
+        if (Build.VERSION.SDK_INT >= 23) {
+            Bitmap bitmap = makeStatusIcon(speed);
 
-        testing = true;
-        testButton.setEnabled(false);
-        testButton.setText("TEST EN COURS…");
-
-        status.setText("Mesure du ping…");
-        ping.setText("…");
-        download.setText("…");
-        upload.setText("…");
-
-        worker.execute(() -> {
-
-            String p = measurePing();
-
-            runOnUiThread(() -> {
-                ping.setText(p);
-                status.setText("Mesure du téléchargement…");
-            });
-
-            String d = measureDownload();
-
-            runOnUiThread(() -> {
-                download.setText(d);
-                status.setText("Mesure de l’envoi…");
-            });
-
-            String u = measureUpload();
-
-            runOnUiThread(() -> {
-                upload.setText(u);
-                status.setText("Test terminé");
-
-                testButton.setEnabled(true);
-                testButton.setText("RECOMMENCER LE TEST");
-                testing = false;
-            });
-        });
-    }
-
-    private String measurePing() {
-        long best = Long.MAX_VALUE;
-        int ok = 0;
-
-        for (int i = 0; i < 3; i++) {
-            HttpURLConnection c = null;
-
-            try {
-                long t = System.nanoTime();
-
-                c = (HttpURLConnection) new URL(
-                        "https://speed.cloudflare.com/cdn-cgi/trace"
-                ).openConnection();
-
-                c.setConnectTimeout(5000);
-                c.setReadTimeout(5000);
-                c.setUseCaches(false);
-
-                c.getInputStream().close();
-
-                best = Math.min(
-                        best, (System.nanoTime() - t) / 1_000_000);
-
-                ok++;
-
-            } catch (Exception ignored) {
-            } finally {
-                if (c != null) c.disconnect();
+            if (bitmap != null) {
+                builder.setSmallIcon(Icon.createWithBitmap(bitmap));
             }
         }
 
-        return ok == 0 ? "N/D" : Long.toString(best);
+        return builder.build();
     }
 
-    private String measureDownload() {
-        HttpURLConnection c = null;
-
+    private Bitmap makeStatusIcon(String rate) {
         try {
-            c = (HttpURLConnection) new URL(
-                    "https://speed.cloudflare.com/__down?bytes=5000000"
-            ).openConnection();
+            int width = 144;
+            int height = 128;
 
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(20000);
-            c.setUseCaches(false);
+            Bitmap bitmap = Bitmap.createBitmap(
+                    width, height, Bitmap.Config.ARGB_8888);
 
-            long t = System.nanoTime();
-            long total = 0;
-            byte[] b = new byte[8192];
+            Canvas canvas = new Canvas(bitmap);
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-            java.io.InputStream in = c.getInputStream();
-            int n;
+            paint.setColor(Color.WHITE);
+            paint.setTypeface(Typeface.create(
+                    "sans-serif-condensed", Typeface.BOLD));
+            paint.setTextAlign(Paint.Align.CENTER);
 
-            while ((n = in.read(b)) != -1) {
-                total += n;
-            }
+            String[] parts = statusRateParts(rate);
+            String number = parts[0];
+            String unit = parts[1];
 
-            in.close();
+            // Nombre centré dans la partie supérieure.
+            paint.setTextSize(
+                    number.length() > 4 ? 42f : 52f);
 
-            double sec = (System.nanoTime() - t) / 1e9;
+            Paint.FontMetrics fm = paint.getFontMetrics();
+            float numberY = 48f
+                    - (fm.ascent + fm.descent) / 2f;
 
-            if (total == 0 || sec <= 0) return "N/D";
+            canvas.drawText(
+                    number, width / 2f, numberY, paint);
 
-            return String.format(
-                    Locale.US, "%.2f",
-                    total * 8.0 / sec / 1e6);
+            // Unité centrée sous le nombre.
+            paint.setTypeface(Typeface.create(
+                    "sans-serif-condensed", Typeface.BOLD));
+            paint.setTextSize(27f);
+
+            fm = paint.getFontMetrics();
+            float unitY = 99f
+                    - (fm.ascent + fm.descent) / 2f;
+
+            canvas.drawText(
+                    unit, width / 2f, unitY, paint);
+
+            return bitmap;
 
         } catch (Exception e) {
-            return "N/D";
-        } finally {
-            if (c != null) c.disconnect();
+            return null;
         }
     }
 
-    private String measureUpload() {
-        HttpURLConnection c = null;
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel =
+                    new NotificationChannel(
+                            CHANNEL,
+                            "Vitesse Internet",
+                            NotificationManager.IMPORTANCE_LOW);
 
-        try {
-            byte[] data = new byte[500000];
-            new java.security.SecureRandom().nextBytes(data);
+            channel.setDescription(
+                    "Suivi de la vitesse réseau.");
 
-            c = (HttpURLConnection) new URL(
-                    "https://speed.cloudflare.com/__up"
-            ).openConnection();
+            NotificationManager nm =
+                    (NotificationManager)
+                    getSystemService(NOTIFICATION_SERVICE);
 
-            c.setRequestMethod("POST");
-            c.setDoOutput(true);
-            c.setConnectTimeout(10000);
-            c.setReadTimeout(20000);
-            c.setFixedLengthStreamingMode(data.length);
-
-            c.setRequestProperty(
-                    "Content-Type", "application/octet-stream");
-
-            long t = System.nanoTime();
-
-            OutputStream out = c.getOutputStream();
-            out.write(data);
-            out.flush();
-            out.close();
-
-            int code = c.getResponseCode();
-
-            if (code < 200 || code >= 400) return "N/D";
-
-            java.io.InputStream in = c.getInputStream();
-            byte[] b = new byte[512];
-
-            while (in.read(b) != -1) { }
-            in.close();
-
-            double sec = (System.nanoTime() - t) / 1e9;
-
-            if (sec <= 0) return "N/D";
-
-            return String.format(
-                    Locale.US, "%.2f",
-                    data.length * 8.0 / sec / 1e6);
-
-        } catch (Exception e) {
-            return "N/D";
-        } finally {
-            if (c != null) c.disconnect();
+            nm.createNotificationChannel(channel);
         }
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        handler.removeCallbacks(refresh);
-        handler.post(refresh);
-    }
+    public void onDestroy() {
+        handler.removeCallbacks(ticker);
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        handler.removeCallbacks(refresh);
-    }
+        getSharedPreferences("speed", MODE_PRIVATE)
+                .edit()
+                .putBoolean("running", false)
+                .apply();
 
-    @Override
-    protected void onDestroy() {
-        worker.shutdownNow();
-        handler.removeCallbacks(refresh);
+        stopForeground(true);
         super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
     }
 }

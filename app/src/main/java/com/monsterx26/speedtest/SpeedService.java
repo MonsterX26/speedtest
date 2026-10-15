@@ -1,3 +1,4 @@
+
 package com.monsterx26.speedtest;
 
 import android.app.Service;
@@ -39,7 +40,8 @@ public class SpeedService extends Service {
             long rx = TrafficStats.getTotalRxBytes();
             long tx = TrafficStats.getTotalTxBytes();
 
-            long total = (rx < 0 || tx < 0) ? -1 : rx + tx;
+            long total = (rx < 0 || tx < 0)
+                    ? -1 : rx + tx;
 
             String speed = "Indisponible";
 
@@ -73,58 +75,95 @@ public class SpeedService extends Service {
                     (NotificationManager)
                     getSystemService(NOTIFICATION_SERVICE);
 
-            nm.notify(
-                    1,
-                    buildNotification(
-                            speed,
-                            getSharedPreferences("speed", MODE_PRIVATE)
-                                    .getString(
-                                            "daily",
-                                            "Aujourd'hui : calcul…"),
-                            getSharedPreferences("speed", MODE_PRIVATE)
-                                    .getString(
-                                            "monthly",
-                                            "Ce mois : calcul…")
-                    )
-            );
+            nm.notify(1, buildNotification(
+                    speed,
+                    getSharedPreferences("speed", MODE_PRIVATE)
+                            .getString("daily",
+                                    "Aujourd'hui : calcul…"),
+                    getSharedPreferences("speed", MODE_PRIVATE)
+                            .getString("monthly",
+                                    "Ce mois : calcul…")
+            ));
 
-            handler.postDelayed(this, 500);
+            handler.postDelayed(this, 1000);
         }
     };
 
     @Override
     public void onCreate() {
         super.onCreate();
-
         createChannel();
 
-        startForeground(
-                1,
-                buildNotification(
-                        "Mesure…",
-                        "Aujourd'hui : calcul…",
-                        "Ce mois : calcul…"
-                )
-        );
+        startForeground(1, buildNotification(
+                "Mesure…",
+                "Aujourd'hui : calcul…",
+                "Ce mois : calcul…"
+        ));
     }
 
     @Override
     public int onStartCommand(
             Intent intent, int flags, int startId) {
 
+        handler.removeCallbacks(ticker);
+        handler.post(ticker);
+
         getSharedPreferences("speed", MODE_PRIVATE)
                 .edit()
                 .putBoolean("running", true)
                 .apply();
 
-        handler.removeCallbacks(ticker);
-        handler.post(ticker);
-
         return START_STICKY;
     }
 
-    private void updateUsage(long totalBytes, long now) {
+    private String formatRate(double bps) {
+        if (bps < 1024) {
+            return String.format(
+                    Locale.US, "%.0f B/s", bps);
+        }
 
+        if (bps < 1024 * 1024) {
+            return String.format(
+                    Locale.US, "%.1f KB/s", bps / 1024);
+        }
+
+        return String.format(
+                Locale.US, "%.2f MB/s",
+                bps / (1024 * 1024));
+    }
+
+    private String[] statusRateParts(String rate) {
+        if (rate == null) {
+            return new String[]{"--", "KB/s"};
+        }
+
+        String value = rate.trim();
+
+        if (value.endsWith("MB/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 4).trim(),
+                    "MB/s"
+            };
+        }
+
+        if (value.endsWith("KB/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 4).trim(),
+                    "KB/s"
+            };
+        }
+
+        if (value.endsWith("B/s")) {
+            return new String[]{
+                    value.substring(0, value.length() - 3).trim(),
+                    "B/s"
+            };
+        }
+
+        return new String[]{value, ""};
+    }
+
+    private void updateUsage(long totalBytes, long now) {
         android.content.SharedPreferences p =
                 getSharedPreferences("usage", MODE_PRIVATE);
 
@@ -147,8 +186,7 @@ public class SpeedService extends Service {
         if (!month.equals(oldMonth)) monthly = 0;
 
         long delta = totalBytes >= lastTotal
-                ? totalBytes - lastTotal
-                : 0;
+                ? totalBytes - lastTotal : 0;
 
         daily += delta;
         monthly += delta;
@@ -161,95 +199,39 @@ public class SpeedService extends Service {
                 .putLong("monthly", monthly)
                 .apply();
 
-        String dailyText =
-                "Aujourd'hui : " + formatBytes(daily);
-
-        String monthlyText =
-                "Ce mois : " + formatBytes(monthly);
-
         getSharedPreferences("speed", MODE_PRIVATE)
                 .edit()
-                .putString("daily", dailyText)
-                .putString("monthly", monthlyText)
+                .putString("daily",
+                        "Aujourd'hui : " + formatBytes(daily))
+                .putString("monthly",
+                        "Ce mois : " + formatBytes(monthly))
                 .apply();
     }
 
-    private String formatRate(double bps) {
-        if (bps < 1024) {
-            return String.format(
-                    Locale.US, "%.0f B/s", bps);
-        }
-
-        if (bps < 1024 * 1024) {
-            return String.format(
-                    Locale.US, "%.1f KB/s", bps / 1024);
-        }
-
-        return String.format(
-                Locale.US, "%.2f MB/s",
-                bps / (1024 * 1024));
-    }
-
-    private String[] statusRateParts(String rate) {
-        try {
-            String trimmed = rate.trim();
-
-            if (trimmed.endsWith("MB/s")) {
-                return new String[] {
-                        trimmed.substring(
-                                0, trimmed.length() - 4).trim(),
-                        "MB/s"
-                };
-            }
-
-            if (trimmed.endsWith("KB/s")) {
-                return new String[] {
-                        trimmed.substring(
-                                0, trimmed.length() - 4).trim(),
-                        "KB/s"
-                };
-            }
-
-            if (trimmed.endsWith("B/s")) {
-                return new String[] {
-                        trimmed.substring(
-                                0, trimmed.length() - 3).trim(),
-                        "B/s"
-                };
-            }
-        } catch (Exception ignored) { }
-
-        return new String[] { "--", "KB/s" };
-    }
-
     private String formatBytes(long bytes) {
-        double b = Math.max(0, bytes);
-
-        if (b < 1024) {
-            return String.format(Locale.US, "%.0f B", b);
-        }
-
-        if (b < 1024L * 1024) {
+        if (bytes < 1024) {
             return String.format(
-                    Locale.US, "%.1f KB", b / 1024);
+                    Locale.US, "%.0f B", (double) bytes);
         }
 
-        if (b < 1024L * 1024 * 1024) {
+        if (bytes < 1024L * 1024) {
+            return String.format(
+                    Locale.US, "%.1f KB", bytes / 1024.0);
+        }
+
+        if (bytes < 1024L * 1024 * 1024) {
             return String.format(
                     Locale.US, "%.2f MB",
-                    b / (1024 * 1024));
+                    bytes / (1024.0 * 1024));
         }
 
         return String.format(
                 Locale.US, "%.2f GB",
-                b / (1024.0 * 1024 * 1024));
+                bytes / (1024.0 * 1024 * 1024));
     }
 
     private Notification buildNotification(
             String speed, String daily, String monthly) {
-
-        String title = "Vitesse Internet : " + speed;
-        String content = daily + " • " + monthly;
 
         Notification.Builder builder;
 
@@ -259,14 +241,12 @@ public class SpeedService extends Service {
             builder = new Notification.Builder(this);
         }
 
-        builder.setContentTitle(title)
-                .setContentText(content)
-                .setStyle(
-                        new Notification.BigTextStyle()
-                                .bigText(
-                                        "Vitesse actuelle : " + speed
-                                        + "\n" + daily
-                                        + "\n" + monthly))
+        builder.setContentTitle("Vitesse Internet : " + speed)
+                .setContentText(daily + " • " + monthly)
+                .setStyle(new Notification.BigTextStyle()
+                        .bigText("Vitesse actuelle : " + speed
+                                + "\n" + daily
+                                + "\n" + monthly))
                 .setSmallIcon(
                         android.R.drawable.stat_notify_sync_noanim)
                 .setOngoing(true)
@@ -276,8 +256,7 @@ public class SpeedService extends Service {
             Bitmap bitmap = makeStatusIcon(speed);
 
             if (bitmap != null) {
-                builder.setSmallIcon(
-                        Icon.createWithBitmap(bitmap));
+                builder.setSmallIcon(Icon.createWithBitmap(bitmap));
             }
         }
 
@@ -286,41 +265,50 @@ public class SpeedService extends Service {
 
     private Bitmap makeStatusIcon(String rate) {
         try {
+            int width = 144;
+            int height = 128;
+
             Bitmap bitmap = Bitmap.createBitmap(
-                    144, 128, Bitmap.Config.ARGB_8888);
+                    width, height, Bitmap.Config.ARGB_8888);
 
             Canvas canvas = new Canvas(bitmap);
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
             paint.setColor(Color.WHITE);
-            paint.setTypeface(
-                    Typeface.create(
-                            "sans-serif-condensed",
-                            Typeface.BOLD));
-
+            paint.setTypeface(Typeface.create(
+                    "sans-serif-condensed", Typeface.BOLD));
             paint.setTextAlign(Paint.Align.CENTER);
 
             String[] parts = statusRateParts(rate);
-
             String number = parts[0];
             String unit = parts[1];
 
+            // Nombre centré dans la partie supérieure.
             paint.setTextSize(
-                    number.length() > 4 ? 46f : 58f);
+                    number.length() > 4 ? 42f : 52f);
 
-            canvas.drawText(number, 72f, 54f, paint);
+            Paint.FontMetrics fm = paint.getFontMetrics();
+            float numberY = 48f
+                    - (fm.ascent + fm.descent) / 2f;
 
-            paint.setTypeface(
-                    Typeface.create(
-                            "sans-serif", Typeface.BOLD));
+            canvas.drawText(
+                    number, width / 2f, numberY, paint);
 
-            paint.setTextSize(30f);
+            // Unité centrée sous le nombre.
+            paint.setTypeface(Typeface.create(
+                    "sans-serif-condensed", Typeface.BOLD));
+            paint.setTextSize(27f);
 
-            canvas.drawText(unit, 72f, 96f, paint);
+            fm = paint.getFontMetrics();
+            float unitY = 99f
+                    - (fm.ascent + fm.descent) / 2f;
+
+            canvas.drawText(
+                    unit, width / 2f, unitY, paint);
 
             return bitmap;
 
-        } catch (Exception ignored) {
+        } catch (Exception e) {
             return null;
         }
     }
@@ -334,12 +322,13 @@ public class SpeedService extends Service {
                             NotificationManager.IMPORTANCE_LOW);
 
             channel.setDescription(
-                    "Affiche la vitesse réseau actuelle "
-                    + "dans la barre d'état et la notification.");
+                    "Suivi de la vitesse réseau.");
 
-            ((NotificationManager)
-                    getSystemService(NOTIFICATION_SERVICE))
-                    .createNotificationChannel(channel);
+            NotificationManager nm =
+                    (NotificationManager)
+                    getSystemService(NOTIFICATION_SERVICE);
+
+            nm.createNotificationChannel(channel);
         }
     }
 

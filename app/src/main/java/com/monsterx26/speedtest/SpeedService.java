@@ -1,4 +1,3 @@
-
 package com.monsterx26.speedtest;
 
 import android.app.Service;
@@ -6,12 +5,6 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Handler;
@@ -25,6 +18,7 @@ import java.util.Locale;
 public class SpeedService extends Service {
 
     private static final String CHANNEL = "internet_usage";
+    private static final int NOTIFICATION_ID = 1;
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
@@ -50,9 +44,8 @@ public class SpeedService extends Service {
                         && total >= previousBytes
                         && now > previousTime) {
 
-                    double rate =
-                            (total - previousBytes) * 1000.0
-                            / (now - previousTime);
+                    double rate = (total - previousBytes)
+                            * 1000.0 / (now - previousTime);
 
                     speed = formatRate(rate);
                 } else {
@@ -61,31 +54,31 @@ public class SpeedService extends Service {
 
                 previousBytes = total;
                 previousTime = now;
-
                 updateUsage(total, now);
             }
 
-            getSharedPreferences("speed", MODE_PRIVATE)
-                    .edit()
+            android.content.SharedPreferences prefs =
+                    getSharedPreferences("speed", MODE_PRIVATE);
+
+            prefs.edit()
                     .putString("value", speed)
                     .putBoolean("running", true)
                     .apply();
 
+            String daily = prefs.getString(
+                    "daily", "Aujourd’hui : calcul…");
+
+            String monthly = prefs.getString(
+                    "monthly", "Ce mois : calcul…");
+
             NotificationManager nm =
                     (NotificationManager)
-                    getSystemService(NOTIFICATION_SERVICE);
+                            getSystemService(NOTIFICATION_SERVICE);
 
-            nm.notify(1, buildNotification(
-                    speed,
-                    getSharedPreferences("speed", MODE_PRIVATE)
-                            .getString("daily",
-                                    "Aujourd'hui : calcul…"),
-                    getSharedPreferences("speed", MODE_PRIVATE)
-                            .getString("monthly",
-                                    "Ce mois : calcul…")
-            ));
+            nm.notify(NOTIFICATION_ID,
+                    buildNotification(speed, daily, monthly));
 
-            handler.postDelayed(this, 500);
+            handler.postDelayed(this, 1000);
         }
     };
 
@@ -94,18 +87,18 @@ public class SpeedService extends Service {
         super.onCreate();
         createChannel();
 
-        startForeground(1, buildNotification(
-                "Mesure…",
-                "Aujourd'hui : calcul…",
-                "Ce mois : calcul…"
-        ));
+        startForeground(NOTIFICATION_ID,
+                buildNotification("Mesure…",
+                        "Aujourd’hui : calcul…",
+                        "Ce mois : calcul…"));
     }
 
     @Override
-    public int onStartCommand(
-            Intent intent, int flags, int startId) {
-
+    public int onStartCommand(Intent intent,
+                              int flags, int startId) {
         handler.removeCallbacks(ticker);
+        previousBytes = -1;
+        previousTime = 0;
         handler.post(ticker);
 
         getSharedPreferences("speed", MODE_PRIVATE)
@@ -116,51 +109,20 @@ public class SpeedService extends Service {
         return START_STICKY;
     }
 
-    private String formatRate(double bps) {
-        if (bps < 1024) {
-            return String.format(
-                    Locale.US, "%.0f B/s", bps);
+    private String formatRate(double bytesPerSecond) {
+        if (bytesPerSecond < 1024) {
+            return String.format(Locale.US,
+                    "%.0f B/s", bytesPerSecond);
         }
 
-        if (bps < 1024 * 1024) {
-            return String.format(
-                    Locale.US, "%.1f KB/s", bps / 1024);
+        if (bytesPerSecond < 1024 * 1024) {
+            return String.format(Locale.US,
+                    "%.1f KB/s", bytesPerSecond / 1024.0);
         }
 
-        return String.format(
-                Locale.US, "%.2f MB/s",
-                bps / (1024 * 1024));
-    }
-
-    private String[] statusRateParts(String rate) {
-        if (rate == null) {
-            return new String[]{"--", "KB/s"};
-        }
-
-        String value = rate.trim();
-
-        if (value.endsWith("MB/s")) {
-            return new String[]{
-                    value.substring(0, value.length() - 4).trim(),
-                    "MB/s"
-            };
-        }
-
-        if (value.endsWith("KB/s")) {
-            return new String[]{
-                    value.substring(0, value.length() - 4).trim(),
-                    "KB/s"
-            };
-        }
-
-        if (value.endsWith("B/s")) {
-            return new String[]{
-                    value.substring(0, value.length() - 3).trim(),
-                    "B/s"
-            };
-        }
-
-        return new String[]{value, ""};
+        return String.format(Locale.US,
+                "%.2f MB/s",
+                bytesPerSecond / (1024.0 * 1024));
     }
 
     private void updateUsage(long totalBytes, long now) {
@@ -202,7 +164,7 @@ public class SpeedService extends Service {
         getSharedPreferences("speed", MODE_PRIVATE)
                 .edit()
                 .putString("daily",
-                        "Aujourd'hui : " + formatBytes(daily))
+                        "Aujourd’hui : " + formatBytes(daily))
                 .putString("monthly",
                         "Ce mois : " + formatBytes(monthly))
                 .apply();
@@ -210,23 +172,22 @@ public class SpeedService extends Service {
 
     private String formatBytes(long bytes) {
         if (bytes < 1024) {
-            return String.format(
-                    Locale.US, "%.0f B", (double) bytes);
+            return String.format(Locale.US,
+                    "%.0f B", (double) bytes);
         }
 
         if (bytes < 1024L * 1024) {
-            return String.format(
-                    Locale.US, "%.1f KB", bytes / 1024.0);
+            return String.format(Locale.US,
+                    "%.1f KB", bytes / 1024.0);
         }
 
         if (bytes < 1024L * 1024 * 1024) {
-            return String.format(
-                    Locale.US, "%.2f MB",
-                    bytes / (1024.0 * 1024));
+            return String.format(Locale.US,
+                    "%.2f MB", bytes / (1024.0 * 1024));
         }
 
-        return String.format(
-                Locale.US, "%.2f GB",
+        return String.format(Locale.US,
+                "%.2f GB",
                 bytes / (1024.0 * 1024 * 1024));
     }
 
@@ -250,67 +211,10 @@ public class SpeedService extends Service {
                 .setSmallIcon(
                         android.R.drawable.stat_notify_sync_noanim)
                 .setOngoing(true)
-                .setOnlyAlertOnce(true);
-
-        if (Build.VERSION.SDK_INT >= 23) {
-            Bitmap bitmap = makeStatusIcon(speed);
-
-            if (bitmap != null) {
-                builder.setSmallIcon(Icon.createWithBitmap(bitmap));
-            }
-        }
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false);
 
         return builder.build();
-    }
-
-    private Bitmap makeStatusIcon(String rate) {
-        try {
-            int width = 144;
-            int height = 128;
-
-            Bitmap bitmap = Bitmap.createBitmap(
-                    width, height, Bitmap.Config.ARGB_8888);
-
-            Canvas canvas = new Canvas(bitmap);
-            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-            paint.setColor(Color.WHITE);
-            paint.setTypeface(Typeface.create(
-                    "sans-serif-condensed", Typeface.BOLD));
-            paint.setTextAlign(Paint.Align.CENTER);
-
-            String[] parts = statusRateParts(rate);
-            String number = parts[0];
-            String unit = parts[1];
-
-            // Nombre centré dans la partie supérieure.
-            paint.setTextSize(
-                    number.length() > 4 ? 42f : 52f);
-
-            Paint.FontMetrics fm = paint.getFontMetrics();
-            float numberY = 48f
-                    - (fm.ascent + fm.descent) / 2f;
-
-            canvas.drawText(
-                    number, width / 2f, numberY, paint);
-
-            // Unité centrée sous le nombre.
-            paint.setTypeface(Typeface.create(
-                    "sans-serif-condensed", Typeface.BOLD));
-            paint.setTextSize(27f);
-
-            fm = paint.getFontMetrics();
-            float unitY = 99f
-                    - (fm.ascent + fm.descent) / 2f;
-
-            canvas.drawText(
-                    unit, width / 2f, unitY, paint);
-
-            return bitmap;
-
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private void createChannel() {
@@ -322,11 +226,12 @@ public class SpeedService extends Service {
                             NotificationManager.IMPORTANCE_LOW);
 
             channel.setDescription(
-                    "Suivi de la vitesse réseau.");
+                    "Suivi de la vitesse du réseau.");
+            channel.setShowBadge(false);
 
             NotificationManager nm =
                     (NotificationManager)
-                    getSystemService(NOTIFICATION_SERVICE);
+                            getSystemService(NOTIFICATION_SERVICE);
 
             nm.createNotificationChannel(channel);
         }

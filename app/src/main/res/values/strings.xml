@@ -1,6 +1,4 @@
-
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Speed Lite+</string>
-    <string name="accessibility_description">Service de suivi de la connexion Internet</string>
 </resources>

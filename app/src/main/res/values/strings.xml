@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Speed Lite+</string>
+    <string name="accessibility_description">Affiche la vitesse de connexion Internet dans la barre d’état.</string>
 </resources>

@@ -1,14 +1,25 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+}
 
 android {
-    namespace 'com.example.internetspeed'
+    namespace 'com.monsterx26.speedtest'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.example.internetspeed'
-        minSdk 26
+        applicationId 'com.monsterx26.speedtest.lite'
+        minSdk 21
         targetSdk 28
-        versionCode 1
-        versionName '1.0'
+        versionCode 3
+        versionName '3.0-lite-plus'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile(
+                'proguard-android-optimize.txt'
+            ), 'proguard-rules.pro'
+        }
     }
 }

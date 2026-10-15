@@ -85,7 +85,7 @@ public class SpeedService extends Service {
                                     "Ce mois : calcul…")
             ));
 
-            handler.postDelayed(this, 1000);
+            handler.postDelayed(this, 500);
         }
     };
 

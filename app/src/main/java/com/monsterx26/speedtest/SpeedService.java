@@ -88,7 +88,7 @@ public class SpeedService extends Service {
                     )
             );
 
-            handler.postDelayed(this, 1000);
+            handler.postDelayed(this, 500);
         }
     };
 
@@ -287,7 +287,7 @@ public class SpeedService extends Service {
     private Bitmap makeStatusIcon(String rate) {
         try {
             Bitmap bitmap = Bitmap.createBitmap(
-                    72, 64, Bitmap.Config.ARGB_8888);
+                    144, 128, Bitmap.Config.ARGB_8888);
 
             Canvas canvas = new Canvas(bitmap);
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -306,17 +306,17 @@ public class SpeedService extends Service {
             String unit = parts[1];
 
             paint.setTextSize(
-                    number.length() > 4 ? 23f : 29f);
+                    number.length() > 4 ? 46f : 58f);
 
-            canvas.drawText(number, 36f, 27f, paint);
+            canvas.drawText(number, 72f, 54f, paint);
 
             paint.setTypeface(
                     Typeface.create(
                             "sans-serif", Typeface.BOLD));
 
-            paint.setTextSize(15f);
+            paint.setTextSize(30f);
 
-            canvas.drawText(unit, 36f, 48f, paint);
+            canvas.drawText(unit, 72f, 96f, paint);
 
             return bitmap;
 
